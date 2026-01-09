@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>図解：反復重みつき最小二乗法 (IRLS)</title>
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- React & ReactDOM -->
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    
+    <!-- Babel (for JSX) -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    
+    <!-- KaTeX (Math Rendering) -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css" xintegrity="sha384-n8MVd4RsNIU0tAv4ct0nTaAbDJwPJzDEaqSD1odI+WdtXRGWt2kTvGFasHpSy3SV" crossorigin="anonymous">
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js" xintegrity="sha384-XjKyOOlGwcjNTAIQHIpgOno0Hl1YQqzUOEleOLALmuqehneUG+vnGctmUb0ZY0l8" crossorigin="anonymous"></script>
+
+    <style>
+        /* カスタムスクロールバーなどの微調整 */
+        body {
+            font-family: 'Helvetica Neue', Arial, 'Hiragino Kaku Gothic ProN', 'Hiragino Sans', Meiryo, sans-serif;
+        }
+        .math-display {
+            overflow-x: auto;
+            overflow-y: hidden;
+            padding: 0.5rem 0;
+        }
+    </style>
+</head>
+<body class="bg-gray-50 text-gray-800">
+
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useRef } = React;
+
+        // --- アイコンコンポーネント (Lucide代替SVG) ---
+        const IconCalculator = ({ className }) => (
+            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><rect width="16" height="20" x="4" y="2" rx="2"/><line x1="8" x2="16" y1="6" y2="6"/><line x1="16" x2="16" y1="14" y2="18"/><path d="M16 10h.01"/><path d="M12 10h.01"/><path d="M8 10h.01"/><path d="M12 14h.01"/><path d="M8 14h.01"/><path d="M12 18h.01"/><path d="M8 18h.01"/></svg>
+        );
+        const IconTrendingUp = ({ className }) => (
+            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/></svg>
+        );
+        const IconScale = ({ className }) => (
+            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><path d="m16 16 3-8 3 8c-.87.65-1.92 1-3 1s-2.13-.35-3-1Z"/><path d="m2 16 3-8 3 8c-.87.65-1.92 1-3 1s-2.13-.35-3-1Z"/><path d="M7 21h10"/><path d="M12 3v18"/><path d="M3 7h2c2 0 5-1 7-2 2 1 5 2 7 2h2"/></svg>
+        );
+        const IconRefreshCw = ({ className }) => (
+            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/></svg>
+        );
+        const IconCheckCircle = ({ className }) => (
+            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><path d="M22 4 12 14.01l-3-3"/></svg>
+        );
+        const IconArrowRight = ({ className }) => (
+            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>
+        );
+
+        // --- LaTeX レンダリングコンポーネント ---
+        const Latex = ({ children, displayMode = false }) => {
+            const containerRef = useRef(null);
+
+            useEffect(() => {
+                if (window.katex && containerRef.current) {
+                    try {
+                        window.katex.render(children, containerRef.current, {
+                            displayMode: displayMode,
+                            throwOnError: false,
+                        });
+                    } catch (e) {
+                        console.error("KaTeX render error:", e);
+                        containerRef.current.innerText = children;
+                    }
+                }
+            }, [children, displayMode]);
+
+            return <span ref={containerRef} className={displayMode ? 'block my-2 overflow-x-auto overflow-y-hidden' : ''}></span>;
+        };
+
+        // --- メインアプリケーション ---
+        const GLMVisualizer = () => {
+            const [activeStep, setActiveStep] = useState(0);
+
+            const steps = [
+                {
+                    id: 1,
+                    title: "初期化 (Initialization)",
+                    icon: <IconCalculator className="w-6 h-6 text-blue-500" />,
+                    desc: "パラメータの初期値を設定します。",
+                    math: "\\beta^{(0)}"
+                },
+                {
+                    id: 2,
+                    title: "線形予測子 & 平均 (Predict)",
+                    icon: <IconTrendingUp className="w-6 h-6 text-indigo-500" />,
+                    desc: "現在のパラメータで予測値を計算します。",
+                    math: "\\eta = X\\beta, \\quad \\mu = g^{-1}(\\eta)"
+                },
+                {
+                    id: 3,
+                    title: "作動変数 & 重み (Adjust)",
+                    icon: <IconScale className="w-6 h-6 text-amber-500" />,
+                    desc: "局所的な直線近似のために、ターゲット変数(z)と重み(W)を計算します。",
+                    math: "z, \\quad W"
+                },
+                {
+                    id: 4,
+                    title: "WLSによる更新 (Update)",
+                    icon: <IconRefreshCw className="w-6 h-6 text-emerald-500" />,
+                    desc: "重みつき最小二乗法(WLS)を解いて、パラメータを更新します。",
+                    math: "\\beta^{(new)} = (X^T W X)^{-1} X^T W z"
+                },
+                {
+                    id: 5,
+                    title: "収束判定 (Check)",
+                    icon: <IconCheckCircle className="w-6 h-6 text-purple-500" />,
+                    desc: "パラメータの変化が十分に小さければ終了。そうでなければステップ2へ戻ります。",
+                    math: "|\\beta^{(new)} - \\beta^{(old)}| < \\epsilon"
+                }
+            ];
+
+            const nextStep = () => {
+                setActiveStep((prev) => (prev + 1) % steps.length);
+            };
+
+            return (
+                <div className="p-6 min-h-screen font-sans">
+                
+                    {/* Header Section */}
+                    <header className="mb-8 text-center">
+                        <h1 className="text-3xl font-bold text-gray-900 mb-2">図解：反復重みつき最小二乗法 (IRLS)</h1>
+                        <p className="text-gray-600">一般化線形モデル(GLM)の最尤推定を解くためのアルゴリズム</p>
+                    </header>
+
+                    {/* Main Concept Grid */}
+                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 max-w-6xl mx-auto">
+
+                        {/* Left Column: The Workflow Diagram */}
+                        <div className="bg-white p-6 rounded-xl shadow-md border border-gray-200">
+                            <h2 className="text-xl font-bold mb-6 flex items-center text-blue-800 border-b pb-2">
+                                <IconRefreshCw className="mr-2 w-6 h-6" /> アルゴリズムの反復フロー
+                            </h2>
+                        
+                            <div className="relative">
+                                {steps.map((step, index) => (
+                                <div 
+                                    key={step.id}
+                                    onClick={() => setActiveStep(index)}
+                                    className={`flex items-start mb-6 p-4 rounded-lg cursor-pointer transition-all duration-300 border-l-4 ${
+                                    activeStep === index 
+                                        ? 'bg-blue-50 border-blue-500 shadow-sm transform scale-102' 
+                                        : 'bg-white border-gray-200 hover:bg-gray-50'
+                                    }`}
+                                >
+                                    <div className="mt-1 mr-4 p-2 bg-gray-100 rounded-full">
+                                        {step.icon}
+                                    </div>
+                                    <div className="flex-1">
+                                        <div className="flex justify-between items-center mb-1">
+                                            <h3 className={`font-bold ${activeStep === index ? 'text-blue-700' : 'text-gray-700'}`}>
+                                            Step {step.id}: {step.title}
+                                            </h3>
+                                        </div>
+                                        <p className="text-sm text-gray-600 mb-2">{step.desc}</p>
+                                        <div className="bg-gray-800 text-white px-3 py-2 rounded text-sm font-mono overflow-x-auto">
+                                            <Latex displayMode={false}>{step.math}</Latex>
+                                        </div>
+                                    </div>
+                                </div>
+                                ))}
+                                
+                                {/* Visual loop connector */}
+                                <div className="absolute left-8 top-10 bottom-10 w-0.5 bg-gray-200 -z-10 border-r-2 border-dashed"></div>
+                            </div>
+
+                            <button 
+                                onClick={nextStep}
+                                className="w-full mt-4 py-3 bg-blue-600 text-white rounded-lg font-bold hover:bg-blue-700 transition-colors flex items-center justify-center"
+                            >
+                                次のステップへ進む <IconArrowRight className="ml-2 w-4 h-4" />
+                            </button>
+                        </div>
+
+                        {/* Right Column: Detailed Explanation & Math */}
+                        <div className="space-y-6">
+                        
+                            {/* Section: Why IRLS? */}
+                            <div className="bg-white p-6 rounded-xl shadow-md border-l-4 border-amber-400">
+                                <h3 className="text-lg font-bold mb-3 text-gray-800">なぜ IRLS が必要なのか？</h3>
+                                <ul className="list-disc list-inside space-y-2 text-sm text-gray-700 leading-relaxed">
+                                <li>
+                                    通常の線形回帰とは異なり、GLMの最尤推定方程式は<strong>非線形</strong>です。
+                                </li>
+                                <li>
+                                    解析的（一発）に解けないため、<strong>ニュートン・ラフソン法</strong>（数値最適化手法）を使用します。
+                                </li>
+                                <li>
+                                    このニュートン法を式変形すると、あたかも「重みつき最小二乗法」を繰り返し解いている形になるため、IRLSと呼ばれます。
+                                </li>
+                                </ul>
+                            </div>
+
+                            {/* Section: Mathematical Details */}
+                            <div className="bg-white p-6 rounded-xl shadow-md border-l-4 border-indigo-500">
+                                <h3 className="text-lg font-bold mb-4 text-gray-800">数理的詳細（LaTeX）</h3>
+                                
+                                <div className="space-y-6">
+                                
+                                <div>
+                                    <h4 className="font-bold text-sm text-indigo-600 mb-2">1. 線形予測子とリンク関数</h4>
+                                    <p className="text-sm text-gray-600 mb-2">
+                                    説明変数の線形結合 <Latex>{"\\eta"}</Latex> と、期待値 <Latex>{"\\mu"}</Latex> をリンク関数 <Latex>{"g"}</Latex> で繋ぎます。
+                                    </p>
+                                    <div className="bg-gray-50 p-3 rounded border border-gray-200 text-sm">
+                                    <Latex displayMode={true}>
+                                        {"\\eta_i = \\mathbf{x}_i^T \\beta, \\quad \\eta_i = g(\\mu_i)"}
+                                    </Latex>
+                                    </div>
+                                </div>
+
+                                <div>
+                                    <h4 className="font-bold text-sm text-amber-600 mb-2">2. 作動変数 (Working Dependent Variable) <Latex>{"z"}</Latex></h4>
+                                    <p className="text-sm text-gray-600 mb-2">
+                                    リンク関数の局所的な接線を使って、応答変数を線形空間に写像したものです。
+                                    </p>
+                                    <div className="bg-gray-50 p-3 rounded border border-gray-200 text-sm">
+                                    <Latex displayMode={true}>
+                                        {"z_i = \\eta_i + (y_i - \\mu_i) \\frac{d\\eta_i}{d\\mu_i}"}
+                                    </Latex>
+                                    </div>
+                                </div>
+
+                                <div>
+                                    <h4 className="font-bold text-sm text-emerald-600 mb-2">3. 重み行列 <Latex>{"W"}</Latex></h4>
+                                    <p className="text-sm text-gray-600 mb-2">
+                                    分散 <Latex>{"V(\\mu)"}</Latex> とリンク関数の勾配に依存します。情報の精度を表します。
+                                    </p>
+                                    <div className="bg-gray-50 p-3 rounded border border-gray-200 text-sm">
+                                    <Latex displayMode={true}>
+                                        {"W_{ii} = \\frac{1}{Var(Y_i)} \\left( \\frac{d\\mu_i}{d\\eta_i} \\right)^2"}
+                                    </Latex>
+                                    </div>
+                                </div>
+
+                                <div>
+                                    <h4 className="font-bold text-sm text-blue-600 mb-2">4. 更新式 (ニュートン法の一歩)</h4>
+                                    <div className="bg-gray-50 p-3 rounded border border-gray-200 text-sm">
+                                    <Latex displayMode={true}>
+                                        {"\\beta^{(t+1)} = (X^T W^{(t)} X)^{-1} X^T W^{(t)} \\mathbf{z}^{(t)}"}
+                                    </Latex>
+                                    </div>
+                                    <p className="text-xs text-gray-500 mt-2">
+                                    ※ これは重み <Latex>{"W"}</Latex> と目的変数 <Latex>{"z"}</Latex> を用いた重みつき最小二乗法(WLS)の解と同じ形です。
+                                    </p>
+                                </div>
+
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<GLMVisualizer />);
+    </script>
+</body>
+</html>
